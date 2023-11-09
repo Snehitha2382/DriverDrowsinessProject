@@ -1,29 +1,21 @@
-import requests
-import json
 import time
 import sys
 from threading import Thread
 from imutils import face_utils
-import imutils
 import numpy as np
 import cv2
 import dlib
 from scipy.spatial import distance as dist
 from twilio.rest import Client
-import pyglet
 import pygame
 import geocoder
-import sqlite3
-from datetime import datetime, timedelta
-
-import cv2
+import time
 
 def detect_hand():
     # Load the cascade classifier
     hand_cascade = cv2.CascadeClassifier('palm.xml')
-
+    start_time = time.time()
     # Read the video from the webcam
-    cap = cv2.VideoCapture(0)
 
     while True:
         # Read the frames
@@ -42,13 +34,18 @@ def detect_hand():
         # Display the frames
         cv2.imshow('Hand detection', frame)
 
-        # If 'q' is pressed, break from the loop
+        # Stop the video capture after 'duration' seconds
+        elapsed_time = time.time() - start_time
+        if elapsed_time >= 120 or len(hands)>0:
+            break
+
+        # Exit on 'q' key
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     # Release the video capture and close the windows
-    cap.release()
-    cv2.destroyAllWindows()
+    cv2.destroyWindow('Hand detection')
+    time.sleep(0.01)
 
     # If hands are detected, return true
     if len(hands) > 0:
@@ -61,24 +58,11 @@ def eye_aspect_ratio(eye):
     # compute the euclidean distance between the vertical eye landmarks
     A = dist.euclidean(eye[1], eye[5])
     B = dist.euclidean(eye[2], eye[4])
-
     # compute the euclidean distance between the horizontal eye landmarks
     C = dist.euclidean(eye[0], eye[3])
-
     # compute the EAR
     ear = (A + B) / (2 * C)
     return ear
-
-def play_alarm():
-    foo = pyglet.media.load("/home/souvik/Downloads/alarm3.mp3")
-    foo.play()
-
-    def exiter(dt):
-        pyglet.app.exit()
-    # print("Song length is: %f" % foo.duration)
-    pyglet.clock.schedule_once(exiter, foo.duration)
-    pyglet.app.run()
-
 
 def play_alarm2():
     pygame.mixer.init()
@@ -91,7 +75,6 @@ def get_current_location(g_maps_url):
     g = geocoder.ip('me')
     lat = g.latlng[0]
     long = g.latlng[1]
-    #print(lat, long)
     current_location = g_maps_url.format(lat, long)
     return current_location
 
@@ -99,7 +82,7 @@ def get_current_location(g_maps_url):
 def send_alert_message(driver, contact_list, current_location):
     # twilio credentials
     account_sid = "AC21735cda0a0fb2722ffdfbd321d9bfaa"
-    auth_token = "1984adf19b082521876b8fb08c891e94"
+    auth_token = "d92b997a76fae942a61af5a397b2f47f"
     sender = "+12397192691"
     message = "Test Message: {} doesn't seem okay.Please check.Last known location: {}".format(driver, current_location)
 
@@ -115,20 +98,6 @@ def send_alert_message(driver, contact_list, current_location):
 def fetch_contact_list(driver):
     # create an empty list that will store the user's contact numbers
     contacts = []
-    """# create a database object
-    db = sqlite3.connect("user_info")
-    # create a cursor object
-    cursor = db.cursor()
-    args = (driver,)
-    # create a select query
-    select_query = "SELECT contact1_num, contact2_num, contact3_num FROM contacts WHERE user_name=(?)"
-    # execute the query
-    result = cursor.execute(select_query, args)
-    for row in result:
-        contacts.append(row[0])
-        contacts.append(row[1])
-        contacts.append(row[2])
-    #print(contacts)"""
     print("Please enter your three emergency contacts: ")
     contacts.append(input("Enter first contact: "))
     contacts.append(input("Enter second contact: "))
@@ -173,16 +142,6 @@ while CONTINUOUS_FRAMES:
         # convert the frame to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         rects = detector(gray, 0)
-        """ x = rect.left()
-            y = rect.top()
-            x1 = rect.right()
-            y1 = rect.bottom()
-            # get the facial landmarks
-            landmarks = np.matrix([[p.x, p.y] for p in predictor(frame, rect).parts()])
-            # get the left eye landmarks
-            left_eye = landmarks[LEFT_EYE_POINTS]
-            # get the right eye landmarks
-            right_eye = landmarks[RIGHT_EYE_POINTS]"""
         for rect in rects:
             shape = predictor(gray, rect)
             shape = face_utils.shape_to_np(shape)#converting to NumPy Array
@@ -208,6 +167,7 @@ while CONTINUOUS_FRAMES:
                     #print("Eye blinked")
                     if not ALARM_ON:
                         ALARM_ON = True
+                        TOTAL+=1
                         t = Thread(target=play_alarm2)
                         t.daemon = True
                         t.start()
@@ -220,12 +180,22 @@ while CONTINUOUS_FRAMES:
                     print("Something wrong?")
                     CONTINUOUS_FRAMES = False
                     break
+              
+            elif TOTAL==5:
+                TOTAL=0
+                cv2.putText(frame, "PLEASE SHOW YOUR HAND TO THE CAMERA", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                if detect_hand()==True:
+                    cv2.putText(frame, "YOU ARE GOOD TO GO. PLEASE DRIVE SAFE!!!", (10, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                else:
+                    current_location = get_current_location(g_maps_url)
+                    send_alert_message(driver, contact_list, current_location)
 
             else:
                 COUNTER = 0
                 ALARM_ON = False
 
-            #cv2.putText(frame, "Blinks{}".format(TOTAL), (10, 30), cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 255, 255), 1)
             cv2.putText(frame, "EAR {}".format(ear_avg), (10, 60), cv2.FONT_HERSHEY_DUPLEX, 0.7, (0, 255, 255), 1)
         cv2.imshow("Winks Found", frame)
         key = cv2.waitKey(1) & 0xFF
@@ -238,12 +208,7 @@ while CONTINUOUS_FRAMES:
 cap.release()
 # destroy all windows
 cv2.destroyAllWindows()
-
-#driver = "Souvik"
 # send message to the person's 3 immediate contacts
 current_location = get_current_location(g_maps_url)
-# get the contact list of the person
-#contact_list = fetch_contact_list(driver)
 send_alert_message(driver, contact_list, current_location)
-#print(current_location)
 sys.exit()
